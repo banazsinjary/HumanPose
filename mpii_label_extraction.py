@@ -10,7 +10,7 @@ import pandas as pd
 import copy
 
 # set directory and get filenames
-proj_dir = r"C:\Users\Charl\Documents\College\2 - CSC 871\project\mpii_human_pose\\"
+proj_dir = r"C:\Users\ckite\Documents\Project\mpii_human_pose\\"
 filenames = os.listdir(proj_dir + "images")
 
 # index to joint name conversion
@@ -30,9 +30,6 @@ matlab_mpii = scipy.io.loadmat(os.path.join(proj_dir, 'mpii_human_pose_v1_u12_1.
 
 # get number of images
 num_images = matlab_mpii.__dict__['annolist'][0].shape[0]
-
-##### TODO -->
-# get category and activity
 
 # names of label columns
 label_colnames = ['img_name', 'person', 'category', 'activity',

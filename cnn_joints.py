@@ -98,7 +98,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.0001)
 model.to(device)
 
 # Training loop (5 epochs -> 8796 sec for all, sec for 3000 images)
-epochs = 10
+epochs = 200
 start = time.time()
 for epoch in range(epochs):
     
@@ -157,7 +157,7 @@ for epoch in range(epochs):
 
         model.eval()  # Set the model to evaluation mode
         with torch.no_grad():
-            joint_coords, joint_vis = model(images, locs_and_scales)
+            pred_coords, pred_vis = model(images, locs_and_scales)
         
         # mask outputs
         val_visibility_mask = joint_visibility.repeat_interleave(2, dim=1)

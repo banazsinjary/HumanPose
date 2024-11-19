@@ -22,7 +22,6 @@ class FeatureExtraction(nn.Module):
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
         self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
-        #self.conv4 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
         
         # Dropout after convolutional layers
         self.dropout_conv1 = nn.Dropout2d(dropout_rate)
@@ -42,12 +41,9 @@ class FeatureExtraction(nn.Module):
         
         x = self.pool(F.relu(self.conv3(x)))
         x = self.dropout_conv3(x)
-        
-        #x = self.pool(F.relu(self.conv4(x)))
-        
+                
         # Global Average Pooling to reduce spatial dimensions
         x = self.global_avg_pool(x)
-        #x = torch.flatten(x, 1)  # Flatten to (batch_size, 128)
         x = x.view(x.size(0), -1)
 
         return x
@@ -57,36 +53,33 @@ class JointDetectionCNN(nn.Module):
     def __init__(self, input_channels=3, dropout_rate=.5):
         super(JointDetectionCNN, self).__init__()
         
-        self.cnn = FeatureExtraction(input_channels)
+        self.cnn = FeatureExtraction(input_channels, dropout_rate)
         
         self.fc1 = nn.Linear(256 + 3, 128)
         self.fc2 = nn.Linear(128, 64)
         
-        # Dropout after fully connected layers
         self.dropout_fc1 = nn.Dropout(dropout_rate)
         self.dropout_fc2 = nn.Dropout(dropout_rate)
         
         self.joint_coordinates = nn.Linear(64, 32)
-        
-        #self.fc_input_size = H*W
+        self.joint_visibility = nn.Linear(64, 16)
 
     def forward(self, image, loc_and_scale):
         
         image_features = self.cnn(image)
-        
         combined_features = torch.cat((image_features, loc_and_scale), dim=1)
         
         # Pass through fully connected layers
         x = F.relu(self.fc1(combined_features))
         x = self.dropout_fc1(x)
-        
         x = F.relu(self.fc2(x))
         x = self.dropout_fc2(x)
         
         # Separate outputs for coordinates and visibility
         joint_coords = self.joint_coordinates(x)
+        joint_visibility = self.joint_visibility(x)
         
-        return joint_coords
+        return joint_coords, joint_visibility
 
 class EarlyStopping:
     def __init__(self, patience=5, verbose=False, delta=0, path='checkpoint.pth'):

@@ -33,7 +33,7 @@ image_labels = pd.read_csv(proj_dir + "labels.csv", index_col=0)
 
 
 # Define transformations
-H = 360; W = 640
+H = 480; W = 720
 transform = transforms.Compose([
     transforms.Resize((H, W)),  # Resize to target size
     transforms.ToTensor(),  # Convert to tensor and scale to [0, 1]
@@ -46,7 +46,7 @@ transform = transforms.Compose([
 ### Load data and create DataLoaders
 
 # get list of filenames
-img_filenames = image_labels['img_name'][0:6000].values
+img_filenames = image_labels['img_name'][0:3000].values
 
 # split train/validation/test
 files_train, files_test = train_test_split(img_filenames, test_size=0.2, random_state=1)
@@ -88,7 +88,7 @@ val_dataloader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
 # early stopping and loss criteria
 early_stopping = cnn.EarlyStopping(patience=5, verbose=True, delta=0, path=proj_dir + 'checkpoint.pth')
-criterion = nn.MSELoss(reduction='none')  # Mean Squared Error Loss for coordinate prediction
+loc_criterion = nn.MSELoss(reduction='none')  # Mean Squared Error Loss for coordinate prediction
 
 # Initialize model and optimizer
 model = cnn.JointDetectionCNN()
@@ -98,7 +98,7 @@ optimizer = optim.Adam(model.parameters(), lr=0.0001)
 model.to(device)
 
 # Training loop (5 epochs -> 8796 sec for all, sec for 3000 images)
-epochs = 100
+epochs = 10
 start = time.time()
 for epoch in range(epochs):
     
@@ -111,29 +111,36 @@ for epoch in range(epochs):
     for image_names, scales, images, locs_and_scales, joint_visibility, joint_positions in train_dataloader:
         
         # move data to gpu if available
-        images, locs_and_scales, joint_positions = images.to(device), locs_and_scales.to(device), joint_positions.to(device)
-
+        images, locs_and_scales = images.to(device), locs_and_scales.to(device)
+        joint_positions, joint_visibility = joint_positions.to(device), joint_visibility.to(device)
+        
         # set gradient mode
         optimizer.zero_grad()
         
         # Forward pass
-        outputs = model(images, locs_and_scales)
+        pred_coords, pred_vis = model(images, locs_and_scales)
         
         # mask outputs
         visibility_mask = joint_visibility.repeat_interleave(2, dim=1)
         visibility_mask = visibility_mask.to(device)
         
-        # calculate loss with mask and take average (sum / number of visibile joint coords)
-        loss = criterion(outputs, joint_positions)
+        # calculate joint location loss with mask and take average (sum / number of visibile joint coords)
+        loss = loc_criterion(pred_coords, joint_positions)
         masked_loss = loss * visibility_mask
         actual_loss = masked_loss.sum() / visibility_mask.sum()
         
+        # calculate visibility loss
+        vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
+
+        # total loss
+        total_loss = actual_loss + vis_loss        
+
         # Backward pass and optimization
-        actual_loss.backward()
+        total_loss.backward()
         optimizer.step()
         
         # keep tally of running loss
-        running_loss += actual_loss.item()
+        running_loss += total_loss.item()
         
         # regular updates on progress
         iter_count += 1
@@ -145,23 +152,30 @@ for epoch in range(epochs):
     for image_names, scales, images, locs_and_scales, joint_visibility, joint_positions in val_dataloader:
         
         # move data to gpu if available
-        images, locs_and_scales, joint_positions = images.to(device), locs_and_scales.to(device), joint_positions.to(device)
+        images, locs_and_scales = images.to(device), locs_and_scales.to(device)
+        joint_positions, joint_visibility = joint_positions.to(device), joint_visibility.to(device)
 
         model.eval()  # Set the model to evaluation mode
         with torch.no_grad():
-            outputs = model(images, locs_and_scales)
+            joint_coords, joint_vis = model(images, locs_and_scales)
         
         # mask outputs
         val_visibility_mask = joint_visibility.repeat_interleave(2, dim=1)
         val_visibility_mask = val_visibility_mask.to(device)
 
         # calculate loss with mask and take average (sum / number of visibile joint coords)
-        val_loss = criterion(outputs, joint_positions)
+        val_loss = loc_criterion(pred_coords, joint_positions)
         val_masked_loss = val_loss * val_visibility_mask
         val_actual_loss = val_masked_loss.sum() / val_visibility_mask.sum()
         
+        # calculate visibility loss
+        vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
+
+        # total loss
+        total_loss = actual_loss + vis_loss        
+        
         # keep tally of running loss
-        running_val_loss += val_actual_loss.item()
+        running_val_loss += total_loss.item()
 
     val_time = time.time()
     print(f"Epoch [{epoch+1}/{epochs}] Validation complete ({val_time-train_time:.1f} seconds) Loss: {running_val_loss:.2f}")
@@ -253,17 +267,16 @@ model = torch.load(proj_dir + "jt_model.pth")
 
 
 
+# ### load test images
+# start = time.time()
+# images, filenames, sizes = dl.load_images_in_chunks(img_dir, files_test, transform, 500)
+# time.time() - start
 
-### load test images
-start = time.time()
-images, filenames, sizes = dl.load_images_in_chunks(img_dir, files_test, transform, 500)
-time.time() - start
+# # Get test labels
+# label_test = image_labels[image_labels['img_name'].isin(filenames)]
+# size_test = pd.DataFrame(sizes, columns=['img_name', 'image_size_w', 'image_size_h'])
+# label_test = pd.merge(label_test, size_test)
 
-# Get test labels
-label_test = image_labels[image_labels['img_name'].isin(filenames)]
-size_test = pd.DataFrame(sizes, columns=['img_name', 'image_size_w', 'image_size_h'])
-label_test = pd.merge(label_test, size_test)
-
-# load test data
-test_dataset = dl.getDataset(label_test, images, filenames)
-test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+# # load test data
+# test_dataset = dl.getDataset(label_test, images, filenames)
+# test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)

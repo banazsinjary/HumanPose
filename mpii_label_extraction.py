@@ -8,6 +8,8 @@ import os
 import scipy.io
 import pandas as pd
 import copy
+import random
+
 
 # set directory and get filenames
 proj_dir = r"C:\Users\ckite\Documents\Project\mpii_human_pose\\"
@@ -59,18 +61,28 @@ for i in range(16): joint_dict_template[i] = (0,0,0)
 training_labels = pd.DataFrame(columns=label_colnames)
 test_labels = pd.DataFrame(columns=label_colnames)
 
+
 # iterate through images to extract labels of images with 0 or 1 person in them
 for i in range(num_images):
 
     # check # of annotated single persons in image
     person_id = matlab_mpii.__dict__['single_person'][i][0].flatten()    
-    if len(person_id) > 1: continue # exclude images with more than 1 single person in annotations
-    #if len(person_id) > 1: person_id = person_id[0] # include only 1st single person in annotations
-        
+
+    # drop images with no annotated person(s) in them
+    if len(person_id) < 1: 
+        #print(f"i={i}: len(person_id)={len(person_id)}")
+        continue
+
+    #if len(person_id) > 1: continue # exclude images with more than 1 single person in annotations
     # get annotations, training/test allocation, name, category and activity of image
+    # include only one person from images with multiple persons annotated
+    if len(person_id) > 1: 
+        person_id = random.choice(person_id)
+    else: person_id = person_id[0]
+    
     annotations = matlab_mpii.__dict__['annolist'][0, i]
-    train_test_mpii = matlab_mpii.__dict__['img_train'][0, i].flatten()[0]
-    img_name = annotations.__dict__['image'][0, 0].__dict__['name'][0]
+    train_test_mpii = matlab_mpii.__dict__['img_train'][0, i].flatten()
+    img_name = annotations.__dict__['image'][0, 0].__dict__['name']
 
     act = matlab_mpii.__dict__['act'][i, 0]    
     img_cat = act.__dict__['cat_name'].tolist()
@@ -80,75 +92,59 @@ for i in range(num_images):
         img_cat = img_cat[0]
     img_act = act.__dict__['act_name'].tolist()
     
-    ### dropping images with no annotated person(s) in them
-    # set labels of images without an annotated person in them
-    # if len(person_id) < 1:
-    #     # drop image without an annotated single person in them
-    #     img_labels = [img_name] + [0]*52
-    #     if train_test_mpii == 1:
-    #         training_labels = pd.concat([training_labels, pd.DataFrame([img_labels], columns = label_colnames)])
-    #     elif train_test_mpii == 0:
-    #         test_labels = pd.concat([test_labels, pd.DataFrame([img_labels], columns = label_colnames)])
-    #     else:
-    #         print([train_test_mpii, img_name])
-    
     # set labels of images with 1 person in them
-    if len(person_id) == 1:
-        joint_dict = copy.deepcopy(joint_dict_template)
-        # use try/catch to handle key and index errors
-        try:
-            # get annotated points and number of joints in image
-            annorect_img_mpii = annotations.__dict__['annorect'][0, person_id-1][0]
-            obj_pos = annorect_img_mpii.__dict__['objpos'][0, 0]
-            scale = annorect_img_mpii.__dict__['scale'][0][0]
-            annopoints_img_mpii = annorect_img_mpii.__dict__['annopoints'][0, 0]
-            num_joints = annopoints_img_mpii.__dict__['point'][0].shape[0]
-            
-            # create base for image labels for this image
-            img_labels = [img_name, 1, img_cat, img_act, 
-                          obj_pos.__dict__['x'].flatten()[0], 
-                          obj_pos.__dict__['y'].flatten()[0], scale]
-            for j in range(num_joints):
-                # check visibility of joint
-                vis = annopoints_img_mpii.__dict__['point'][0, j].__dict__['is_visible'].flatten()
-                # head and neck have no entry for vis (it is an empty array)
-                # so only drop joints that are set as not visible
-                if vis.size > 0 and vis[0] == 0: continue
-            
-                # get id and location of joint and store in dictionary
-                x = annopoints_img_mpii.__dict__['point'][0, j].__dict__['x'].flatten()[0]
-                y = annopoints_img_mpii.__dict__['point'][0, j].__dict__['y'].flatten()[0]
-                id_ = annopoints_img_mpii.__dict__['point'][0, j].__dict__['id'][0][0]
-                joint_dict[id_] = (1, x, y)
-                
-            # add joint visibility and locations to labels for this image
-            for j_id in range(16):
-                img_labels = img_labels + [*joint_dict[j_id]]
-                
-            # add image labels to appropriate df
-            if train_test_mpii == 1:
-                training_labels = pd.concat([training_labels, pd.DataFrame([img_labels], columns = label_colnames)])
-            elif train_test_mpii == 0:
-                test_labels = pd.concat([test_labels, pd.DataFrame([img_labels], columns = label_colnames)])
-            else:
-                print([train_test_mpii, img_name])
+    joint_dict = copy.deepcopy(joint_dict_template)
+    # use try/catch to handle key and index errors
+
+    
+    try:
+        # get annotated points and number of joints in image
+        annorect_img_mpii = annotations.__dict__['annorect'][0, person_id-1]
+        obj_pos = annorect_img_mpii.__dict__['objpos'][0, 0]
+        scale = annorect_img_mpii.__dict__['scale'][0][0]
+        annopoints_img_mpii = annorect_img_mpii.__dict__['annopoints'][0, 0]
+        num_joints = annopoints_img_mpii.__dict__['point'][0].shape[0]
         
-        # catch errors
-        except KeyError:
-            ### no annotated joints: drop from dataset
-            # print('Key Error: image #' + str(i) + ", " + img_name)
-            # img_labels = [img_name, 1] + [0]*51
-            # if train_test_mpii == 1:
-            #     training_labels = pd.concat([training_labels, pd.DataFrame([img_labels], columns = label_colnames)])
-            # elif train_test_mpii == 0:
-            #     test_labels = pd.concat([test_labels, pd.DataFrame([img_labels], columns = label_colnames)])
-            # else:
-            #     print([train_test_mpii, img_name])
-            continue
-        except IndexError:
-            # images with more than 1 person but only 1 is annotated
-            # print(i, img_name)
-            continue
+        # create base for image labels for this image
+        img_labels = [img_name, 1, img_cat, img_act, 
+                      obj_pos.__dict__['x'].flatten()[0], 
+                      obj_pos.__dict__['y'].flatten()[0], scale]
+        for j in range(num_joints):
+            # check visibility of joint
+            vis = annopoints_img_mpii.__dict__['point'][0, j].__dict__['is_visible'].flatten()
+            # head and neck have no entry for vis (it is an empty array)
+            # so only drop joints that are set as not visible
+            if vis.size > 0 and vis[0] == 0: continue
+        
+            # get id and location of joint and store in dictionary
+            x = annopoints_img_mpii.__dict__['point'][0, j].__dict__['x'].flatten()[0]
+            y = annopoints_img_mpii.__dict__['point'][0, j].__dict__['y'].flatten()[0]
+            id_ = annopoints_img_mpii.__dict__['point'][0, j].__dict__['id'][0][0]
+            joint_dict[id_] = (1, x, y)
+            
+        # add joint visibility and locations to labels for this image
+        for j_id in range(16):
+            img_labels = img_labels + [*joint_dict[j_id]]
+            
+        # add image labels to appropriate df
+        if train_test_mpii == 1:
+            training_labels = pd.concat([training_labels, pd.DataFrame([img_labels], columns = label_colnames)])
+        elif train_test_mpii == 0:
+            test_labels = pd.concat([test_labels, pd.DataFrame([img_labels], columns = label_colnames)])
+        else:
+            print([train_test_mpii, img_name])
+    
+    # catch errors
+    except KeyError:
+        ### no annotated joints: drop from dataset
+        print(f"Key Error: {i}, {img_name} has no annotated joints")
+        continue
+    except IndexError:
+        # images with more than 1 person but only 1 is annotated
+        print(f"Index Error: {i}, {img_name}")
+        continue
+    except TypeError:
+        print(f"Type Error: {i}, {img_name}")
     
 training_labels.to_csv(proj_dir + "labels.csv")
 #test_labels.to_csv(proj_dir + "test_labels.csv")

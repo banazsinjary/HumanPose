@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 import sys
 
-code_dir = r"C:\Users\ckite\OneDrive\Documents\GitHub\HumanPose\\"
+code_dir = r"C:\Users\Charl\Documents\GitHub\HumanPose\\"
 sys.path.append(code_dir)
 
 import data_loading as dl
@@ -25,7 +25,7 @@ import model as cnn
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # set project and image directories
-proj_dir = r"C:\Users\ckite\Documents\Project\mpii_human_pose\\"
+proj_dir = r"C:\Users\Charl\Documents\College\2 - CSC 871\project\mpii_human_pose\\"
 img_dir = proj_dir + "images"
 
 # load label data
@@ -46,7 +46,7 @@ transform = transforms.Compose([
 ### Load data and create DataLoaders
 
 # get list of filenames
-img_filenames = image_labels['img_name'][0:3000].values
+img_filenames = image_labels['img_name'][image_labels['category']=='sports'].values
 
 # split train/validation/test
 files_train, files_test = train_test_split(img_filenames, test_size=0.2, random_state=1)
@@ -105,6 +105,8 @@ for epoch in range(epochs):
     epoch_start = time.time()
     model.train()
     running_loss = 0.0
+    running_val_vis_loss = 0.0
+    running_val_coord_loss = 0.0
     running_val_loss = 0.0
         
     iter_count = 0
@@ -133,7 +135,7 @@ for epoch in range(epochs):
         vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
 
         # total loss
-        total_loss = actual_loss + vis_loss        
+        total_loss = actual_loss + .25 * vis_loss        
 
         # Backward pass and optimization
         total_loss.backward()
@@ -169,15 +171,19 @@ for epoch in range(epochs):
         val_actual_loss = val_masked_loss.sum() / val_visibility_mask.sum()
         
         # calculate visibility loss
-        vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
+        val_vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
 
         # total loss
-        total_loss = actual_loss + vis_loss        
+        val_total_loss = val_actual_loss + .25 * val_vis_loss        
         
         # keep tally of running loss
-        running_val_loss += total_loss.item()
+        running_val_vis_loss += vis_loss.item()
+        running_val_coord_loss += val_actual_loss.item()
+        running_val_loss += val_total_loss.item()
 
     val_time = time.time()
+    print(f"running_val_vis_loss={running_val_vis_loss:.6f}")
+    print(f"running_val_coord_loss={running_val_coord_loss:.6f}")
     print(f"Epoch [{epoch+1}/{epochs}] Validation complete ({val_time-train_time:.1f} seconds) Loss: {running_val_loss:.2f}")
     
     early_stopping(running_val_loss, model)
@@ -189,7 +195,9 @@ for epoch in range(epochs):
 end = time.time()
 print(f"Training completed ({end - start:.1f} seconds)")
 
+
 model.load_state_dict(torch.load(proj_dir + 'checkpoint.pth'))
+
 
 # run validation set to get predictions for visualization
 joint_loc_preds_df = pd.DataFrame(columns=['filename'])

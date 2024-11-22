@@ -11,13 +11,15 @@ import os
 from PIL import Image
 import pandas as pd
 from tqdm.auto import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Define the directory where images are stored
-image_dir = '/Users/giodano/Desktop/College/2024_Fall/CSC_871/project/images/'
+image_dir = 'C:/Users/Gio Jung/Desktop/CSC871/HumanPose/images'
 
 # Load CSV metadata
+writer = SummaryWriter(log_dir="logs/tensorboard_logs")
 csv_file = 'dataset.csv'
 data = pd.read_csv(csv_file)
 
@@ -72,7 +74,7 @@ val_paths, test_paths, val_labels, test_labels = train_test_split(
 
 #hyperparameters
 batch_size = 4
-num_epochs = 100
+num_epochs = 300
 learning_rate = 0.001
 
 # Define transformations
@@ -154,14 +156,14 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
 # Training loop
 for epoch in range(num_epochs):
     model.train()
-    running_loss = 0.0
+    train_loss = 0.0
     train_progress = tqdm(train_loader, desc=f"Training - Epoch {epoch+1}/{num_epochs}")
 
     # Gradient accumulation setup
     accumulation_steps = 4
     optimizer.zero_grad()
 
-    for i, (images, labels) in enumerate(train_loader):
+    for i, (images, labels) in enumerate(train_progress):
         images, labels = images.to(device), labels.to(device)
         
         # Forward pass
@@ -176,11 +178,17 @@ for epoch in range(num_epochs):
             optimizer.step()
             optimizer.zero_grad()
 
-        running_loss += loss.item()
+        train_loss += loss.item()
+        train_progress.set_postfix({"Training Loss": loss.item()})
+        torch.cuda.empty_cache()
+
+    model.eval()
 
     # Learning rate scheduling
     scheduler.step()
 
     # Print epoch summary
     print(f"Epoch {epoch+1}/{num_epochs}, "
-          f"Train Loss: {running_loss/len(train_loader):.4f}")
+          f"Train Loss: {train_loss/len(train_loader):.4f}")
+    
+    writer.add_scalar("Loss/train", train_loss/len(train_loader), epoch)

@@ -12,11 +12,14 @@ from PIL import Image
 import pandas as pd
 from tqdm.auto import tqdm
 from torch.utils.tensorboard import SummaryWriter
+import sys
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Define the directory where images are stored
 image_dir = 'C:/Users/Gio Jung/Desktop/CSC871/HumanPose/images'
+
+preprocess_dir = "./preprocessed_images"
 
 # Load CSV metadata
 writer = SummaryWriter(log_dir="logs/tensorboard_logs")
@@ -47,22 +50,16 @@ class ImageDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        # Load image
-        img_path = os.path.join(self.image_dir, self.image_paths[idx])
-        image = Image.open(img_path).convert('RGB')  # Ensure RGB format
-
-        # Load label
+        # Get the path to the preprocessed tensor
+        img_path = os.path.join("preprocessed_images", os.path.basename(self.image_paths[idx]) + ".pt")
+        
+        # Load the preprocessed tensor
+        image = torch.load(img_path)
+        
+        # Get the label
         label = self.labels[idx]
-
-        # Apply transformations
-        if self.transform:
-            image = self.transform(image)
-
-        # Convert label to tensor
-        label = torch.tensor(label, dtype=torch.long)
-
-        return image, label
-
+    
+        return image, torch.tensor(label, dtype=torch.long)
 
 # Split into train, validation, and test sets
 train_paths, temp_paths, train_labels, temp_labels = train_test_split(
@@ -75,7 +72,7 @@ val_paths, test_paths, val_labels, test_labels = train_test_split(
 #hyperparameters
 batch_size = 4
 num_epochs = 300
-learning_rate = 0.001
+learning_rate = 0.0005
 
 # Define transformations
 transform = transforms.Compose([
@@ -84,10 +81,18 @@ transform = transforms.Compose([
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])  # Normalize
 ])
 
+if not os.listdir(preprocess_dir):
+    # Preprocess and save all images
+    for img_path in tqdm(image_paths, desc="Preprocessing images"):
+        img = Image.open(os.path.join(image_dir, img_path)).convert('RGB')
+        img = transform(img)
+        torch.save(img, os.path.join(preprocess_dir, os.path.basename(img_path) + ".pt"))
+    print("Preprocessing Image complete!")
+
 # Create datasets
-train_dataset = ImageDataset(train_paths, train_labels, image_dir, transform=transform)
-val_dataset = ImageDataset(val_paths, val_labels, image_dir, transform=transform)
-test_dataset = ImageDataset(test_paths, test_labels, image_dir, transform=transform)
+train_dataset = ImageDataset(train_paths, train_labels, image_dir, transform=None)
+val_dataset = ImageDataset(val_paths, val_labels, image_dir, transform=None)
+test_dataset = ImageDataset(test_paths, test_labels, image_dir, transform=None)
 
 # Create DataLoaders
 batch_size = 32
@@ -101,8 +106,6 @@ labels = ('sports', 'occupation', 'water activities', 'home activities',
  'fishing and hunting', 'walking', 'running', 'self care', 'music playing',
  'home repair', 'transportation', 'dancing', 'inactivity quiet/light',
  'volunteer activities', 'nan')
-
-
 
 # Define CNN Model
 class CNN(nn.Module):
@@ -143,8 +146,6 @@ class CNN(nn.Module):
         x = self.dropout(x)
         x = self.fc2(x)
         return x
-
-
 
 model = CNN(len(set(labels))).to(device)
 
@@ -187,8 +188,27 @@ for epoch in range(num_epochs):
     # Learning rate scheduling
     scheduler.step()
 
-    # Print epoch summary
-    print(f"Epoch {epoch+1}/{num_epochs}, "
-          f"Train Loss: {train_loss/len(train_loader):.4f}")
+    val_loss = 0.0
+    val_progress = tqdm(val_loader, desc=f"Validation - Epoch {epoch+1}/{num_epochs}")
+    val_correct = 0
+    val_total = 0
+
+    with torch.no_grad():
+        for images, labels in val_progress:
+            images, labels = images.to(device), labels.to(device)
+
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            val_loss += loss.item()
+            val_progress.set_postfix({"Validation Loss": loss.item()})
+
+            _, preds = torch.max(outputs, 1)
+            val_correct += (preds == labels).sum().item()
+            val_total += labels.size(0)
     
-    writer.add_scalar("Loss/train", train_loss/len(train_loader), epoch)
+    writer.add_scalar("Loss/train", train_loss / len(train_loader), epoch)
+    writer.add_scalar("Loss/val", val_loss / len(val_loader), epoch)
+    writer.add_scalar("Accurary/val", val_correct / val_total, epoch)
+    writer.add_scalar("Learning Rate", scheduler.get_last_lr()[0], epoch)
+    model.save_pretrained("./model_pretrained/", "epoch_%d" % (epoch))

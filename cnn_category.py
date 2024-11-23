@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from torch.utils.tensorboard import SummaryWriter
 import sys
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda')
 
 # Define the directory where images are stored
 image_dir = 'C:/Users/Gio Jung/Desktop/CSC871/HumanPose/images'
@@ -36,7 +36,7 @@ encoded_labels = label_encoder.fit_transform(labels)
 
 # Save the mapping for decoding predictions later
 label_mapping = dict(zip(label_encoder.classes_, range(len(label_encoder.classes_))))
-print("Label Mapping:", label_mapping)
+#print("Label Mapping:", label_mapping)
 
 # Define a custom PyTorch Dataset class
 class ImageDataset(Dataset):
@@ -66,7 +66,7 @@ train_paths, temp_paths, train_labels, temp_labels = train_test_split(
     image_paths, encoded_labels, test_size=0.3, stratify=encoded_labels, random_state=42
 )
 val_paths, test_paths, val_labels, test_labels = train_test_split(
-    temp_paths, temp_labels, test_size=0.5, stratify=temp_labels, random_state=42
+    temp_paths, temp_labels, test_size=0.7, stratify=temp_labels, random_state=42
 )
 
 #hyperparameters
@@ -117,7 +117,7 @@ class CNN(nn.Module):
         self.bn2 = nn.BatchNorm2d(128)
         self.conv3 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(2, 2)
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(0.2)
         self.num_classes = num_classes
 
         # Automatically initialize fully connected layers
@@ -211,4 +211,4 @@ for epoch in range(num_epochs):
     writer.add_scalar("Loss/val", val_loss / len(val_loader), epoch)
     writer.add_scalar("Accurary/val", val_correct / val_total, epoch)
     writer.add_scalar("Learning Rate", scheduler.get_last_lr()[0], epoch)
-    model.save_pretrained("./model_pretrained/", "epoch_%d" % (epoch))
+    torch.save(model.state_dict(), f"./model_pretrained/epoch_{epoch}.pth")

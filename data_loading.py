@@ -6,10 +6,10 @@ Created on Thu Oct 31 13:54:06 2024
 """
 
 import torch
-
 import os
 from PIL import Image
 from torch.utils.data import Dataset
+import transform_images as ti
 
 
 class JointDataset(Dataset):
@@ -35,11 +35,13 @@ class JointDataset(Dataset):
 
 
 # Load images
-def load_images(folder_path, file_list, transform):
-    images = []
+def load_images(folder_path, chunk_labels, transform):
+    t_images = []
+    t_labels = []
     incl_files = []
     sizes = []
-    for filename in file_list: 
+    for index, label in chunk_labels.iterrows():
+        filename = label['img_name']
         if filename.endswith(".jpg"):
             img_path = os.path.join(folder_path, filename)
             try:
@@ -49,30 +51,35 @@ def load_images(folder_path, file_list, transform):
                 print(filename)
                 continue
             
-            image = transform(image)  
-            images.append(image)
+            t_image, t_label = ti.transform_annotations(image, label)
+            t_image = transform(t_image)  
+            t_images.append(t_image)
+            t_labels.append(t_label)
             incl_files = incl_files + [filename]
             sizes = sizes + [[filename, *size]]
-    return torch.stack(images), incl_files, sizes  
+            
+    return torch.stack(t_images), t_labels, incl_files, sizes  
 
 
-def load_images_in_chunks(folder_path, file_list, transform, chunk_size=100):
+def load_images_in_chunks(folder_path, data, transform, chunk_size=100):
     all_images = []
+    all_labels = []
     all_files = []
     all_sizes = []
     
     # Process the file list in chunks
-    for i in range(0, len(file_list), chunk_size):
-        chunk_files = file_list[i:i+chunk_size]
-        images, incl_files, sizes = load_images(folder_path, chunk_files, transform)
+    for i in range(0, len(data['img_name']), chunk_size):
+        chunk_labels = data.iloc[i:i+chunk_size]
+        images, labels, incl_files, sizes = load_images(folder_path, chunk_labels, transform)
         all_images.append(images)
+        all_labels.append(labels)
         all_files.extend(incl_files)
         all_sizes.extend(sizes)
         print(f"{i + chunk_size} completed")
     
     # Combine the results from all chunks
     final_images = torch.cat(all_images)  # Combine all image tensors
-    return final_images, all_files, all_sizes
+    return final_images, all_labels, all_files, all_sizes
 
 
 # create dataset from labels, images and filenames

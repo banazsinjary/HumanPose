@@ -30,15 +30,14 @@ img_dir = proj_dir + "images"
 
 # load label data
 image_labels = pd.read_csv(proj_dir + "labels.csv", index_col=0)
-
+image_labels['img_name'] = [eval(name)[0] for name in image_labels['img_name']]
 
 # Define transformations
-H = 480; W = 720
+H = 448; W = 448
 transform = transforms.Compose([
     transforms.Resize((H, W)),  # Resize to target size
     transforms.ToTensor(),  # Convert to tensor and scale to [0, 1]
     transforms.ColorJitter(brightness=0.2, contrast=0.2),
-    ##### TODO --> find mean and sd for image layers
     #transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize
 ])
 
@@ -100,14 +99,21 @@ early_stopping = cnn.EarlyStopping(patience=5, verbose=True, delta=-0.01, path=p
 loc_criterion = nn.MSELoss(reduction='none')  # Mean Squared Error Loss for coordinate prediction
 
 # Initialize model and optimizer
-model = cnn.JointDetectionCNN()
-optimizer = optim.Adam(model.parameters(), lr=0.0001)
-
+#model = cnn.JointDetectionCNN()
+model = cnn.JointDetectionCNN_resnet()
+optimizer = optim.AdamW(model.parameters(), lr=0.0001)
+        
 # move model to gpu if available
 model.to(device)
 
-# Training loop (5 epochs -> 8796 sec for all, sec for 3000 images)
-epochs = 200
+torch.cuda.empty_cache()
+#%%
+# Training loop
+# Train on vis only first, then coords with weighted vis
+epochs = 100
+vis_weight = .25
+training_losses_vis = []
+val_losses_vis = []
 start = time.time()
 for epoch in range(epochs):
     
@@ -130,7 +136,7 @@ for epoch in range(epochs):
         
         # Forward pass
         pred_coords, pred_vis = model(images, locs_and_scales)
-        
+
         # mask outputs
         visibility_mask = joint_visibility.repeat_interleave(2, dim=1)
         visibility_mask = visibility_mask.to(device)
@@ -144,19 +150,20 @@ for epoch in range(epochs):
         vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
 
         # total loss
-        total_loss = actual_loss + .25 * vis_loss        
-
+        total_loss = actual_loss + vis_weight * vis_loss        
+        #total_loss = vis_loss
+        
         # Backward pass and optimization
         total_loss.backward()
         optimizer.step()
         
         # keep tally of running loss
         running_loss += total_loss.item()
-        
         # regular updates on progress
         iter_count += 1
-        if iter_count % 10 == 0: print(f"{iter_count}/{len(train_dataloader)} completed")
+        if iter_count % 100 == 0: print(f"{iter_count}/{len(train_dataloader)} completed")
 
+    training_losses_vis = training_losses_vis + [running_loss]
     train_time = time.time()
     print(f"Epoch [{epoch+1}/{epochs}] Training complete ({train_time-epoch_start:.1f} seconds) Loss: {running_loss:.2f}")
     
@@ -183,13 +190,15 @@ for epoch in range(epochs):
         val_vis_loss = nn.functional.binary_cross_entropy_with_logits(pred_vis, joint_visibility)
 
         # total loss
-        val_total_loss = val_actual_loss + .25 * val_vis_loss        
+        val_total_loss = val_actual_loss + vis_weight * val_vis_loss        
+        #val_total_loss = val_vis_loss
         
         # keep tally of running loss
         running_val_vis_loss += vis_loss.item()
         running_val_coord_loss += val_actual_loss.item()
         running_val_loss += val_total_loss.item()
 
+    val_losses_vis = val_losses_vis + [running_val_loss]
     val_time = time.time()
     print(f"running_val_vis_loss={running_val_vis_loss:.6f}")
     print(f"running_val_coord_loss={running_val_coord_loss:.6f}")
@@ -203,11 +212,14 @@ for epoch in range(epochs):
    
 end = time.time()
 print(f"Training completed ({end - start:.1f} seconds)")
+#%%
 
-torch.save(model.state_dict(), proj_dir + 'joint_model.pth')
+###
 model.load_state_dict(torch.load(proj_dir + 'checkpoint.pth'))
+torch.save(model.state_dict(), proj_dir + 'joint_model_resnet_20241207_multi_conv_redo.pth')
+###
 
-
+#%%
 # run validation set to get predictions for visualization
 joint_loc_preds_df = pd.DataFrame(columns=['filename'])
 model.eval()  # Set the model to evaluation mode
@@ -292,6 +304,7 @@ with torch.no_grad():
 # create a set of test outputs and visualize
 joint_loc_preds_df.to_csv(proj_dir + 'joint_val_preds_df.csv', index=False)
 
+#%%
 # save model
 torch.save(model, proj_dir + 'jt_model.pth') 
 torch.save(model.state_dict(), proj_dir + 'jt_model_state_dict.pth')

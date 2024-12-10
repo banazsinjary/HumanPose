@@ -19,7 +19,7 @@ class JointDataset(Dataset):
         self.images = images
         self.loc_and_scale = loc_and_scale
         self.joint_visibility = joint_visibility
-        self.joint_positions = joint_positions  # Head (x, y) positions
+        self.joint_positions = joint_positions
 
     def __len__(self):
         return len(self.images)
@@ -30,8 +30,47 @@ class JointDataset(Dataset):
         image = self.images[idx]
         loc_and_scale = self.loc_and_scale[idx]
         joint_vis = self.joint_visibility[idx]
-        joint_position = self.joint_positions[idx]  # (head_x, head_y)
+        joint_position = self.joint_positions[idx]
         return file, scale, image, loc_and_scale, joint_vis, joint_position
+
+
+class CatDataset(Dataset):
+    def __init__(self, files, images, loc_and_scale, category, activity):
+        self.files = files
+        self.images = images
+        self.loc_and_scale = loc_and_scale
+        self.category = category
+        self.activity = activity
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        file = self.files[idx]
+        image = self.images[idx]
+        loc_and_scale = self.loc_and_scale[idx]
+        cat = self.category[idx]
+        act = self.activity[idx]
+        return file, image, loc_and_scale, cat, act
+    
+    
+class PoseDataset(Dataset):
+    def __init__(self, images, categories, activities, transform=None):
+        self.images = images
+        self.categories = categories
+        self.activities = activities
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image = self.images[idx]
+        if self.transform:
+            image = self.transform(image)
+        category = self.categories[idx]
+        activity = self.activities[idx]
+        return image, category, activity
 
 
 # Load images
@@ -41,22 +80,22 @@ def load_images(folder_path, chunk_labels, transform):
     incl_files = []
     sizes = []
     for index, label in chunk_labels.iterrows():
-        filename = label['img_name']
-        if filename.endswith(".jpg"):
-            img_path = os.path.join(folder_path, filename)
+        fileimg_name = label['img_name']
+        if fileimg_name.endswith(".jpg"):
+            img_path = os.path.join(folder_path, fileimg_name)
             try:
                 image = Image.open(img_path).convert('RGB') 
                 size = image.size
             except FileNotFoundError:
-                print(filename)
+                print(fileimg_name)
                 continue
             
             t_image, t_label = ti.transform_annotations(image, label)
             t_image = transform(t_image)  
             t_images.append(t_image)
             t_labels.append(t_label)
-            incl_files = incl_files + [filename]
-            sizes = sizes + [[filename, *size]]
+            incl_files = incl_files + [fileimg_name]
+            sizes = sizes + [[fileimg_name, *size]]
             
     return torch.stack(t_images), t_labels, incl_files, sizes  
 
@@ -82,7 +121,7 @@ def load_images_in_chunks(folder_path, data, transform, chunk_size=100):
     return final_images, all_labels, all_files, all_sizes
 
 
-# create dataset from labels, images and filenames
+# create dataset from labels, images and fileimg_names
 def getDataset(labels, images, files):
     
     # scale x values
@@ -115,3 +154,35 @@ def getDataset(labels, images, files):
                            joint_positions=joint_locs)
     return(dataset)
 
+# create dataset from labels, images and fileimg_names
+def getCatDataset(labels, images, files, categories, activities):
+    
+    # scale x values
+    scale_x = 1 / labels['image_size_w']
+    x_cols = labels.filter(like='_x')
+    for col in x_cols.columns: labels[col] = labels[col] * scale_x
+
+    # scale y values
+    scale_y = 1 / labels['image_size_h']
+    # select fields that contain _y and multiply by scale_y
+    y_cols = labels.filter(like='_y')
+    for col in y_cols.columns: labels[col] = labels[col] * scale_y
+    
+    loc_and_scale = torch.tensor(labels[['scale', 'objpos_x', 'objpos_y']].values, 
+                                 dtype=torch.float32)
+    #cat_tensor = torch.tensor(labels[['cateogry']].values, dtype=torch.float32)
+    #act_tensor = torch.tensor(labels[['activity']].values, dtype=torch.float32)
+    dataset = CatDataset(files=files,
+                           images=images, 
+                           loc_and_scale=loc_and_scale, 
+                           category=categories,
+                           activity=activities)
+    return(dataset)
+
+# create dataset from labels, images and fileimg_names
+def getPoseDataset(images, categories, activities):
+
+    dataset = PoseDataset(images=images, 
+                          categories=categories,
+                          activities=activities)
+    return(dataset)

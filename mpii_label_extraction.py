@@ -49,7 +49,8 @@ label_colnames = ['img_name', 'person', 'category', 'activity',
                   'rsho', 'rsho_x', 'rsho_y',
                   'lsho', 'lsho_x', 'lsho_y',
                   'lelb', 'lelb_x', 'lelb_y', 
-                  'lwri', 'lwri_x', 'lwri_y']
+                  'lwri', 'lwri_x', 'lwri_y',
+                  'max_x', 'min_x', 'max_y', 'min_y']
 
 # template for joint dictionary
 joint_dict_template = {}
@@ -108,6 +109,7 @@ for i in range(num_images):
             img_labels = [img_name, 1, img_cat, img_act, 
                           obj_pos.__dict__['x'].flatten()[0], 
                           obj_pos.__dict__['y'].flatten()[0], scale]
+            max_x, min_x, max_y, min_y = 0, 10000, 0, 10000
             for j in range(num_joints):
                 # check visibility of joint
                 vis = annopoints_img_mpii.__dict__['point'][0, j].__dict__['is_visible'].flatten()
@@ -117,14 +119,29 @@ for i in range(num_images):
             
                 # get id and location of joint and store in dictionary
                 x = annopoints_img_mpii.__dict__['point'][0, j].__dict__['x'].flatten()[0]
+                if x > max_x: max_x = x
+                if x < min_x: min_x = x
                 y = annopoints_img_mpii.__dict__['point'][0, j].__dict__['y'].flatten()[0]
+                if y > max_y: max_y = y
+                if y < min_y: min_y = y
+                if y < 0: print(y)
                 id_ = annopoints_img_mpii.__dict__['point'][0, j].__dict__['id'][0][0]
                 joint_dict[id_] = (1, x, y)
                 
             # add joint visibility and locations to labels for this image
             for j_id in range(16):
                 img_labels = img_labels + [*joint_dict[j_id]]
+            
+            img_labels = img_labels + [max_x , min_x, max_y, min_y]
                 
+                
+            ##### TODO ->
+            # Get max x and add padding
+            
+            # Get min x and add padding
+            # Get max y and add padding
+            # Get min y and add padding
+            
             # add image labels to appropriate df
             if train_test_mpii == 1:
                 training_labels = pd.concat([training_labels, pd.DataFrame([img_labels], columns = label_colnames)])
